@@ -1,2 +1,3 @@
 # Comparison-of-NN-and-SVR-Models-for-Trip-Attraction-and-Generation-Prediction
-Comparison of the effectiveness of Neural Networks (NN) and Support Vector Machines (SVR) models to predict trip attraction and generation in various zones using synthetic data. The goal is to improve prediction accuracy to optimize urban planning and public policy decision-making.
+## Description:
+This project focuses on comparing the effectiveness of two prediction models - Neural Networks (NN) and Support Vector Machines (SVR) - to predict trip attraction and generation in different areas. Using synthetic socio-economic demographic data from 256 zones, both models are trained and evaluated to determine which provides better results. The goal is to identify which of these models offers the highest accuracy in predictions, thus aiding in better urban planning and public policy decision-making. Additionally, a detailed section on possible model improvements is included.
