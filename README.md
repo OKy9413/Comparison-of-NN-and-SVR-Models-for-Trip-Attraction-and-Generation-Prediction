@@ -9,6 +9,9 @@ This project focuses on comparing the effectiveness of two prediction models - N
 - **SVR.Rmd**: Specific code for the implementation and evaluation of the Support Vector Machines model.
 - **EvaluacionResultados.R**: Script for evaluating the model results.
 - **EvaluacionResultados_svr.R**: Script for evaluating the SVR model results.
+- **Memoria.pdf**: Pdf field to find out our main work during the project. Is in spanish.
+- **ANEXOS.pdf**: pdf appendix where you can find the main grafics we manage during the study.
+- **Proj10.txt**: AText file with original raw data.
 
 ## System Requirements
 
@@ -80,6 +83,9 @@ Este proyecto se centra en comparar dos tipos de modelos de predicción: Redes N
 - **SVR.Rmd**: Código específico para la implementación y evaluación del modelo de Máquinas de Soporte Vectorial.
 - **EvaluacionResultados.R**: Script para evaluar los resultados del modelo.
 - **EvaluacionResultados_svr.R**: Script para evaluar los resultados del modelo SVR.
+- **Memoria.pdf**: Archivo pdf dónde puedes encontrar las partes más importantes y estructura de nuestro trabajo.
+- **ANEXOS.pdf**: Anexo dónde puedes encontrar los principales gráficos que hemos manejado durante el estudio.
+- **Proj10.txt**: Archivo de texto con los datos cridos originales.
 
 ## Requisitos del Sistema
 
