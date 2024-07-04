@@ -1,0 +1,109 @@
+---
+title: "Neural Networks"
+author: "Julen Larranaga"
+date: "2024-06-27"
+output: html_document
+editor_options: 
+  chunk_output_type: console
+---
+0. LIMPIAR RSTUDIO
+```{r}
+# Clean plots
+if(!is.null(dev.list())) dev.off()
+# Clean data
+rm(list=ls())
+```
+
+1. CARGAR MODELO
+```{r}
+library(ggplot2)
+library(neuralnet)
+
+dsRE_A_Train_absolutos <- read.table("dsRECluster_Por_Train_G_range01.txt", header=TRUE)
+dsRE_A_Test_absolutos <- read.table("dsRECluster_Por_Test_G_range01.txt", header=TRUE)
+
+num_reps <- 5
+
+  models <- vector("list", num_reps)
+  errors <- numeric(num_reps)
+  best_error <- 100
+  
+  for (j in c(3,5,7,9)) {
+    for (i in 1:num_reps) {
+  # Train the neural network model
+  nn <- neuralnet(
+  generacion ~ pob + r_alta + r_media + pob_25 + pob_2565 + sup_tot + sr_sup + i_sup + cluster_1 + cluster_2,
+  data = dsRE_A_Train_absolutos,
+  hidden = j, 
+  rep=1,
+  linear.output=TRUE,
+  err.fct='sse',
+  threshold=0.01,
+  stepmax=1e6,
+  lifesign='minimal')
+
+  # Calculate the error
+  nn_PredTest <-  predict(nn,dsRE_A_Test_absolutos)  
+  
+  error = sqrt(crossprod(nn_PredTest-dsRE_A_Test_absolutos$atraccion)/(nrow(dsRE_A_Test_absolutos)))
+
+  # Store the model and error
+if (error<best_error)
+  best_model <- nn
+  best_error <- error
+  numberofneurons <- j
+    }
+  }
+
+# Redes neuronales
+
+best_model$result.matrix
+plot(best_model)
+```
+RESULTS ANALYSIS
+```{r}
+dsRE_A_Test_absolutos <- read.table('dsRECluster_Por_Test_G_range01.txt', header=TRUE)
+best_model_PredTrain <- predict(best_model,dsRE_A_Train_absolutos)
+best_model_PredTest <-  predict(best_model,dsRE_A_Test_absolutos)
+
+# Llamo a función de Evaluación de resultados
+source("EvaluacionResultados.R")
+
+EvaluacionResultados(dsRE_A_Test_absolutos$atraccion,
+                     best_model_PredTest,
+                     'NNClust_Por_G_range01_PESOS', # CAMBIAR nombre
+                     'range11', # CAMBIAR Escala range01/range11/cr
+                     'A') # CAMBIAR Tipo A/G
+```
+PESOS
+```{r}
+gwplot(nn,selected.covariate="pob")
+# ir probando
+
+```
+
+APILAR ERRORES
+```{r}
+# Cargar librerías necesarias
+if (!require(dplyr)) {
+  install.packages("dplyr")
+}
+if (!require(readr)) {
+  install.packages("readr")
+}
+
+library(dplyr)
+library(readr)
+
+# Lista de nombres de archivos basada en el prefijo 'Param_' y la lista Nombre
+Nombre <- c('NN_Abs_A_cr','NN_Abs_A_range01','NN_Abs_A_range11','NN_Abs_G_cr','NN_Abs_G_range01','NN_Abs_G_range11','NN_Por_A_range01','NN_Por_G_range01','NNClus_Abs_G_range11','NNClus_Por_G_range01','NNClust_Abs_A_range01','NNClust_Abs_A_range11','NNClust_Por_A_range01')
+file_paths <- paste0('output/Param_', Nombre, '.csv')
+
+# Leer y unir todos los archivos CSV en un solo dataframe
+Metrics_NN <- bind_rows(lapply(file_paths, read_csv))
+
+# Guardar el dataframe unido en un archivo CSV
+output_path <- 'output/Metrics_NN.csv'
+# write_csv(Metrics_NN,output_path)
+```
+

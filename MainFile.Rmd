@@ -1,0 +1,1062 @@
+---
+title: "MAIN FILE"
+author: 'Estudiants'
+date: "2024-06-12"
+output: Las escrituras de datos están bloqueadas para no modificar los datasets con los que se ha trabajado.
+editor_options: 
+  chunk_output_type: console
+---
+0. LIMPIAR RSTUDIO
+```{r}
+# Clean plots
+if(!is.null(dev.list())) dev.off()
+# Clean data
+rm(list=ls())
+```
+1. IMPORTAR DATOS Y ELIMINACIÓN DE ERRORES
+```{r}
+# Cargar paquetes necesarios
+library(dplyr)
+library(readr)
+library(mice)
+
+# Cargar el archivo y verificar los nombres de las columnas
+data <- read.csv("Proj10(conheader).csv", header = TRUE, sep = ";")
+
+# Mostrar el dataset y los nombres de las columnas
+print(head(data))
+print(colnames(data))
+
+# Cambiar el tipo de las columnas a numérico y luego a porcentaje
+data <- data %>%
+  mutate(across(c(Ralta, Rmedia, Rbaja, PirPob25, PirPob65, PirPobJ, supSR, supC, supI), as.numeric))
+
+
+# Calcular valores faltantes en grupos de porcentajes
+data <- data %>%
+  rowwise() %>%
+  mutate(
+    `% Ralta` = ifelse(!is.na(Ralta), Ralta, 1 - Rmedia - Rbaja),
+    `% Rbaja` = ifelse(!is.na(Rbaja), Rbaja, 1 - Rmedia - Ralta),
+    `% PirPobJ` = ifelse(!is.na(PirPobJ), PirPobJ, 1 - PirPob65 - PirPob25),
+    `% supI` = ifelse(!is.na(supI), supI, 1 - supC - supSR)
+  )
+
+# Sustituir columnas antiguas por las recalculadas
+data <- data %>%
+  select(nz, Pob, `% Ralta`, Rmedia, `% Rbaja`, PirPob25, PirPob65, `% PirPobJ`, SupTOT, supSR, supC, `% supI`, A, G)
+data <- data %>%
+  rename(
+    `supI` = `% supI`,
+    `PirPobJ` = `% PirPobJ`,
+    `Ralta`= `% Ralta`,
+    `Rbaja`= `% Rbaja`
+  )
+
+
+# Crear columnas para verificar suma 1 y condiciones
+data <- data %>%
+  rowwise() %>%
+  mutate(
+    SUMR = Ralta + Rmedia + Rbaja,
+    SUMP = PirPobJ + PirPob65 + PirPob25,
+    SUMS = supI + supC + supSR,
+    OUT1R = ifelse(abs(1 - abs(SUMR)) < 0.001, 1, 0),
+    OUT1P = ifelse(abs(1 - abs(SUMP)) < 0.001, 1, 0),
+    OUT1S = ifelse(abs(1 - abs(SUMS)) < 0.001, 1, 0),
+    OUT2Ralta = ifelse(Ralta >= 0, 1, 0),
+    OUT2RMedia = ifelse(Rmedia >= 0, 1, 0),
+    OUT2Rbaja = ifelse(Rbaja >= 0, 1, 0),
+    OUT2P25 = ifelse(PirPob25 >= 0, 1, 0),
+    OUT2P2565 = ifelse(PirPob65 >= 0, 1, 0),
+    OUT2P65 = ifelse(PirPobJ >= 0, 1, 0),
+    OUT2SC = ifelse(supC >= 0, 1, 0),
+    OUT2SI = ifelse(supI >= 0, 1, 0),
+    OUT2SSR = ifelse(supSR >= 0, 1, 0)
+  )
+
+# Índice para poder consultar filas de datos erróneos
+indices_datos_erroneos <- which(rowSums(data[c(15:26)]==0)>0)
+
+# Eliminar todas las fracciones relacionadas con el indicador OUT de error
+data[data$OUT2Ralta == 0 | data$OUT1R == 0, "Ralta"] <- NA
+data[data$OUT2RMedia == 0 | data$OUT1R == 0, "Rmedia"] <- NA
+data[data$OUT2Rbaja == 0 | data$OUT1R == 0, "Rbaja"] <- NA
+data[data$OUT2P25 == 0 | data$OUT1P == 0, "PirPob25"] <- NA
+data[data$OUT2P2565 == 0 | data$OUT1P == 0, "PirPob65"] <- NA
+data[data$OUT2P65 == 0 | data$OUT1P == 0, "PirPobJ"] <- NA
+data[data$OUT2SC == 0 | data$OUT1S == 0, "supC"] <- NA
+data[data$OUT2SI == 0 | data$OUT1S == 0, "supI"] <- NA
+data[data$OUT2SSR == 0 | data$OUT1S == 0, "supSR"] <- NA
+
+
+# Imputación usando mice
+# Usamos "pmm" para las columnas que queremos imputar y "" para las que no queremos imputar
+metodos <- make.method(data)
+metodos[c("Ralta", "Rmedia", "Rbaja", "PirPob25", "PirPob65", "PirPobJ", "supC", "supI", "supSR")] <- "pmm"
+metodos[!(names(metodos) %in% c("Ralta", "Rmedia", "Rbaja", "PirPob25", "PirPob65", "PirPobJ", "supC", "supI", "supSR"))] <- ""
+
+# Ejecutar mice especificando el método y el número de imputaciones
+mids <- mice(data, method = metodos, m = 5)
+
+# Obtener los datos imputados (de una de las imputaciones, por ejemplo, la primera)
+datos_imputados <- complete(mids, 1)
+
+# Ajuste de sumas
+ajustar_sumas <- function(df) {
+  df <- df %>%
+    mutate(
+      Ralta = Ralta / (Ralta+Rmedia+Rbaja),
+      Rmedia = Rmedia / (Ralta+Rmedia+Rbaja),
+      Rbaja = Rbaja / (Ralta+Rmedia+Rbaja),
+      PirPob25 = PirPob25 / (PirPob25+PirPob65+PirPobJ),
+      PirPob65 = PirPob65 / (PirPob25+PirPob65+PirPobJ),
+      PirPobJ = PirPobJ / (PirPob25+PirPob65+PirPobJ),
+      supSR = supSR / (supSR+supC+supI),
+      supC = supC / (supSR+supC+supI),
+      supI = supI / (supSR+supC+supI),
+    )
+  return(df)
+}
+
+# Ajustar las sumas en los datos imputados
+datos_imputados <- ajustar_sumas(datos_imputados)
+
+# Cambio de nombre de columnas
+names(datos_imputados) <- c("id", "pob", "r_alta","r_media","r_baja","pob_25","pob_2565","pob_65","sup_tot","sr_sup","c_sup","i_sup","atraccion","generacion")
+# CREAR DATASET CON COLUMNAS ESPECIFICAS
+
+dataset_porcentajes <- datos_imputados %>%
+  select(id, pob, r_alta, r_media, r_baja, pob_25, pob_2565, pob_65, sup_tot,sr_sup, c_sup, i_sup, atraccion, generacion)
+print(dataset_porcentajes)
+
+#  ESCRIBIR LOS DATASETS TRAS FASE 1 - NO EJECUTAR
+#write.table(dataset_porcentajes, "dataset_porcentajes_F1.txt", sep = "\t", row.names = FALSE)
+
+
+```
+0. LIMPIAR RSTUDIO
+```{r}
+# Clean plots
+if(!is.null(dev.list())) dev.off()
+# Clean data
+rm(list=ls())
+```
+
+2.1 ANÁLISIS UNIVARIANTE: BOXPLOT HISTOGRAMA
+```{r}
+dataset_porcentajes <- read.table("dataset_porcentajes_F1.txt", header = TRUE)
+# Instalar las librerías necesarias si no están instaladas
+if (!require(skimr)) {
+  install.packages("skimr")
+}
+if (!require(factoextra)) {
+  install.packages("factoextra")
+}
+if (!require(ggplot2)) {
+  install.packages("ggplot2")
+}
+
+# Cargar las librerías necesarias
+library(tidyverse)
+library(skimr)
+library(caret)
+library(data.table)
+library(knitr)
+library(kableExtra)
+library(factoextra)
+library(ggplot2)
+
+# Listas de columnas según sus características
+columns_fraction <- c("c_sup", "i_sup", "sr_sup", "r_baja", "r_media", "r_alta", "pob_25", "pob_2565", "pob_65")
+columns_others <- c("atraccion", "generacion","sup_tot", "pob")
+
+# Paso 1: Visualización de las distribuciones con histogramas y boxplots
+
+# Histograma y boxplot para columnas que representan fracciones
+for (col in columns_fraction) {
+  p_hist <- ggplot(dataset_porcentajes, aes_string(x = col)) +
+    geom_histogram(bins = 30, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(title = paste("Distribución de", col),
+         x = "Valor",
+         y = "Frecuencia") +
+    xlim(0, 1) +
+    scale_x_continuous(limits = c(0, 1), oob = scales::oob_squish)  # Manejar valores fuera del rango
+  print(p_hist)
+  
+  p_box <- ggplot(dataset_porcentajes, aes_string(y = col)) +
+    stat_boxplot(geom = "errorbar", width = 0.2, coef = 1.5) +
+    geom_boxplot(fill = "blue", color = "black", coef = 1.5) +
+    theme_minimal() +
+    labs(title = paste("Boxplot de", col),
+         x = "",
+         y = "Valor") +
+    coord_flip() +
+    ylim(0, 1)
+  print(p_box)
+}
+
+# Histograma y boxplot para otras columnas
+for (col in columns_others) {
+  p_hist <- ggplot(dataset_porcentajes, aes_string(x = col)) +
+    geom_histogram(bins = 30, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(title = paste("Distribución de", col),
+         x = "Valor",
+         y = "Frecuencia") +
+    scale_x_continuous(oob = scales::oob_squish)  # Manejar valores fuera del rango
+  print(p_hist)
+  
+  p_box <- ggplot(dataset_porcentajes, aes_string(y = col)) +
+    stat_boxplot(geom = "errorbar", width = 0.2, coef = 1.5) +
+    geom_boxplot(fill = "blue", color = "black", coef = 1.5) +
+    theme_minimal() +
+    labs(title = paste("Boxplot de", col),
+         x = "",
+         y = "Valor") +
+    coord_flip()
+  print(p_box)
+}
+
+# Generar un resumen estadístico usando skimr
+skim_result <- skim(dataset_porcentajes)
+
+# Mostrar el resumen estadístico
+print(skim_result)
+```
+2.2 ANÁLISIS MULTIVARIANTE: DISTANCIA DE MAHALANOBIS
+```{r}
+library(chemometrics)
+library(dplyr)
+
+dataset_porcentajes <- read.table("dataset_porcentajes_F1.txt", header = TRUE)
+
+# CREAR DATASET CON ABSOLUTOS y redondeos
+
+dataset_absolutos <- dataset_porcentajes
+
+dataset_absolutos <- dataset_absolutos %>%
+  mutate(
+    r_alta = r_alta * pob, 
+    r_media = r_media * pob, 
+    r_baja = r_baja * pob, 
+    pob_25 = pob_25 * pob, 
+    pob_2565 = pob_2565 * pob,
+    pob_65 = pob_65 * pob,
+    sr_sup = sr_sup * sup_tot,
+    c_sup = c_sup * sup_tot,
+    i_sup = i_sup * sup_tot,
+  )
+
+dataset_absolutos <- dataset_absolutos %>%
+  mutate(across(c(3:8),~round(.,0)))
+
+# NO EJECUTAR - ESCRITURA DATOS ABSOLUTOS
+# write.table(dataset_absolutos, "dataset_absolutos_F1.txt", sep = "\t", row.names = FALSE)
+
+# GRÁFICO DISTANCIAS MAHALANOBIS
+  
+outID<-Moutlier(dataset_absolutos[c(2:4,6,7,9:11,13,14)],quantile=0.9995)
+str(outID)
+outID
+quantile(outID$md,seq(0,1,0.025))
+which((outID$md > outID$cutoff) & (outID$rd > outID$cutoff))
+par(mfrow=c(1,1))
+plot(outID$md, outID$rd )
+text(outID$md, outID$rd, labels=rownames(dataset_absolutos),adj=1, cex=0.5)
+abline(h=outID$cutoff, col="red")
+abline(v=outID$cutoff, col="red")
+
+# Tras evaluar todo lo anterior se decide que se eliminan los datos de fracciones de población en
+outliers_rows_decided <- c(18,35,45)
+
+```
+3. ELIMINACIÓN Y CORRECCIÓN DE OUTLIERS
+```{r}
+library(mice)
+
+# Cargo datos con outliers pero sin errores
+dataset_porcentajes <- read.table("dataset_porcentajes_F1.txt", header = TRUE)
+ds_porcentajes <- dataset_porcentajes
+#Filas a eliminar 
+outliers_rows_decided <- c(18,35,45)
+
+# Elimino todas las fracciones de población correspondientes
+ds_porcentajes[outliers_rows_decided,c("pob_25","pob_2565","pob_65")]<-NA
+
+# Hago inputación usando mice
+# Usamos "pmm" para las columnas que queremos imputar y "" para las que no queremos imputar
+metodos2 <- make.method(ds_porcentajes)
+metodos2 <- "pmm"
+
+# Ejecutar mice especificando el método y el número de imputaciones
+mids2 <- mice(ds_porcentajes, method = metodos2, m = 5)
+
+# Obtener los datos imputados (de una de las imputaciones, por ejemplo, la primera)
+ds_porcentajes <- complete(mids2, 1)
+
+# Ajuste de sumas
+ajustar_sumas2 <- function(df) {
+  df <- df %>%
+    mutate(
+      pob_25 = pob_25 / (pob_25+pob_2565+pob_65),
+      pob_2565 = pob_2565 / (pob_25+pob_2565+pob_65),
+      pob_65 = pob_65 / (pob_25+pob_2565+pob_65),
+    )
+  return(df)
+}
+
+# Ajustar las sumas en los datos imputados
+ds_porcentajes <- ajustar_sumas2(ds_porcentajes)
+
+# Recalcullo valores absolutos
+
+ds_absolutos <- ds_porcentajes
+
+ds_absolutos <- ds_absolutos %>%
+  mutate(
+    r_alta = r_alta * pob, 
+    r_media = r_media * pob, 
+    r_baja = r_baja * pob, 
+    pob_25 = pob_25 * pob, 
+    pob_2565 = pob_2565 * pob,
+    pob_65 = pob_65 * pob,
+    sr_sup = sr_sup * sup_tot,
+    c_sup = c_sup * sup_tot,
+    i_sup = i_sup * sup_tot,
+  )
+
+ds_absolutos <-  ds_absolutos %>%
+  mutate(across(c(3:8),~round(.,0)))
+
+#  ESCRIBIR LOS DATASETS TRAS FASE 2 - NO EJECUTAR
+# write.table(ds_porcentajes, "dataset_porcentajes_F2.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(ds_absolutos, "dataset_absolutos_F2.txt", sep = "\t", row.names = FALSE)
+
+```
+0. LIMPIAR RSTUDIO
+```{r}
+# Clean plots
+if(!is.null(dev.list())) dev.off()
+# Clean data
+rm(list=ls())
+```
+
+UNIVARIANTE PARTE 2
+```{r}
+dataset_porcentajes <- read.table("dataset_porcentajes_F2.txt", header = TRUE)
+# Instalar las librerías necesarias si no están instaladas
+if (!require(skimr)) {
+  install.packages("skimr")
+}
+if (!require(factoextra)) {
+  install.packages("factoextra")
+}
+if (!require(ggplot2)) {
+  install.packages("ggplot2")
+}
+
+# Cargar las librerías necesarias
+library(tidyverse)
+library(skimr)
+library(caret)
+library(data.table)
+library(knitr)
+library(kableExtra)
+library(factoextra)
+library(ggplot2)
+
+# Listas de columnas según sus características
+columns_fraction <- c("c_sup", "i_sup", "sr_sup", "r_baja", "r_media", "r_alta", "pob_25", "pob_2565", "pob_65")
+columns_others <- c("atraccion", "generacion","sup_tot", "pob")
+
+# Paso 1: Visualización de las distribuciones con histogramas y boxplots
+
+# Histograma y boxplot para columnas que representan fracciones
+for (col in columns_fraction) {
+  p_hist <- ggplot(dataset_porcentajes, aes_string(x = col)) +
+    geom_histogram(bins = 30, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(title = paste("Distribución de", col),
+         x = "Valor",
+         y = "Frecuencia") +
+    xlim(0, 1) +
+    scale_x_continuous(limits = c(0, 1), oob = scales::oob_squish)  # Manejar valores fuera del rango
+  print(p_hist)
+  
+  p_box <- ggplot(dataset_porcentajes, aes_string(y = col)) +
+    stat_boxplot(geom = "errorbar", width = 0.2, coef = 1.5) +
+    geom_boxplot(fill = "blue", color = "black", coef = 1.5) +
+    theme_minimal() +
+    labs(title = paste("Boxplot de", col),
+         x = "",
+         y = "Valor") +
+    coord_flip() +
+    ylim(0, 1)
+  print(p_box)
+}
+
+# Histograma y boxplot para otras columnas
+for (col in columns_others) {
+  p_hist <- ggplot(dataset_porcentajes, aes_string(x = col)) +
+    geom_histogram(bins = 30, fill = "blue", color = "black") +
+    theme_minimal() +
+    labs(title = paste("Distribución de", col),
+         x = "Valor",
+         y = "Frecuencia") +
+    scale_x_continuous(oob = scales::oob_squish)  # Manejar valores fuera del rango
+  print(p_hist)
+  
+  p_box <- ggplot(dataset_porcentajes, aes_string(y = col)) +
+    stat_boxplot(geom = "errorbar", width = 0.2, coef = 1.5) +
+    geom_boxplot(fill = "blue", color = "black", coef = 1.5) +
+    theme_minimal() +
+    labs(title = paste("Boxplot de", col),
+         x = "",
+         y = "Valor") +
+    coord_flip()
+  print(p_box)
+}
+
+# Generar un resumen estadístico usando skimr
+skim_result <- skim(dataset_porcentajes)
+
+# Mostrar el resumen estadístico
+print(skim_result)
+```
+ 
+MULTIVARIANTE MAHALANOBIS PARTE 2
+```{r}
+library(chemometrics)
+library(dplyr)
+
+dataset_porcentajes <- read.table("dataset_porcentajes_F2.txt", header = TRUE)
+
+# CREAR DATASET CON ABSOLUTOS y redondeos
+
+dataset_absolutos <- dataset_porcentajes
+
+dataset_absolutos <- dataset_absolutos %>%
+  mutate(
+    r_alta = r_alta * pob, 
+    r_media = r_media * pob, 
+    r_baja = r_baja * pob, 
+    pob_25 = pob_25 * pob, 
+    pob_2565 = pob_2565 * pob,
+    pob_65 = pob_65 * pob,
+    sr_sup = sr_sup * sup_tot,
+    c_sup = c_sup * sup_tot,
+    i_sup = i_sup * sup_tot,
+  )
+
+dataset_absolutos <- dataset_absolutos %>%
+  mutate(across(c(3:8),~round(.,0)))
+
+# NO EJECUTAR - ESCRITURA DATOS ABSOLUTOS
+# write.table(dataset_absolutos, "dataset_absolutos_F1.txt", sep = "\t", row.names = FALSE)
+
+# GRÁFICO DISTANCIAS MAHALANOBIS
+  
+outID<-Moutlier(dataset_absolutos[c(2:4,6,7,9:11,13,14)],quantile=0.9995)
+str(outID)
+outID
+quantile(outID$md,seq(0,1,0.025))
+which((outID$md > outID$cutoff) & (outID$rd > outID$cutoff))
+par(mfrow=c(1,1))
+plot(outID$md, outID$rd )
+text(outID$md, outID$rd, labels=rownames(dataset_absolutos),adj=1, cex=0.5)
+abline(h=outID$cutoff, col="red")
+abline(v=outID$cutoff, col="red")
+
+# Tras evaluar todo lo anterior se decide que se eliminan los datos de fracciones de población en
+outliers_rows_decided <- c(18,35,45)
+
+```
+REESCALADO DE LOS DATOS Y SEPARACIÓN
+```{r}
+library(caret)
+library(dplyr)
+# Lectura de los datos
+ds_porcentajes <- read.table("dataset_porcentajes_F2.txt", header=TRUE)
+ds_absolutos <- read.table("dataset_absolutos_F2.txt", header=TRUE)
+
+# Solo cogemos columnas con variables seleccionadas
+varseleccionadas <-c(2:4,6,7,9,10,12:14) 
+
+dsRE_porcentajes <- ds_porcentajes[varseleccionadas]
+dsRE_absolutos <- ds_absolutos[varseleccionadas]
+
+# Definición de la función de reescalado 
+# Función de centrado y reducido (restar la media y dividir por la desviación típica)
+escalador <- function(x) {scale(x)}
+columns = c(1:10) # Todas
+
+# Función para escalar entre 0 y 1
+range01 <- function(x) { (x - min(x)) / (max(x) - min(x)) }
+columns2 <- c("pob", "sup_tot","generacion", "atraccion")
+
+#Función para escalar entre -1 y 1
+range11 <- function(x) {
+  min_x <- min(x, na.rm = TRUE)
+  max_x <- max(x, na.rm = TRUE)
+  scaled_x <- 2 * (x - min_x) / (max_x - min_x) - 1
+  return(scaled_x)
+}
+
+# Guardado de parámetros del reescalado centrado y reducido
+min_atraccion <- min(dsRE_porcentajes$atraccion)
+max_atraccion <- max(dsRE_porcentajes$atraccion)
+mean_atraccion <- mean(dsRE_porcentajes$atraccion)
+sd_atraccion <- sd(dsRE_porcentajes$atraccion)
+
+min_generacion <- min(dsRE_porcentajes$generacion)
+max_generacion <- max(dsRE_porcentajes$generacion)
+mean_generacion <- mean(dsRE_porcentajes$generacion)
+sd_generacion <- sd(dsRE_porcentajes$generacion)
+
+# Crear un data frame con los valores necesarios
+scaling_values <- data.frame(
+  Variable = c("atraccion", "generacion"),
+  Min = c(min(dsRE_porcentajes$atraccion), min(dsRE_porcentajes$generacion)),
+  Max = c(max(dsRE_porcentajes$atraccion), max(dsRE_porcentajes$generacion)),
+  Mean = c(mean(dsRE_porcentajes$atraccion), mean(dsRE_porcentajes$generacion)),
+  SD = c(sd(dsRE_porcentajes$atraccion), sd(dsRE_porcentajes$generacion))
+)
+# Guardar el data frame como un archivo CSV
+write.csv(scaling_values, "scaling_values.csv", row.names=FALSE)
+# Reescalado de ambos
+dsRE_porcentajes <- dsRE_porcentajes %>%
+  mutate(across(all_of(columns2), range01))
+dsRE_absolutos <- dsRE_absolutos %>%
+  mutate(across(all_of(columns), escalador))
+minmax <- dsRE_absolutos %>%
+  mutate(across(all_of(columns), range01))
+final <- dsRE_absolutos %>%
+  mutate(across(all_of(columns), range11))
+
+# Separación entre train y test
+set.seed(123)  # Para reproducibilidad
+trainIndex <- createDataPartition(dsRE_porcentajes$pob, p = 0.78125, list = FALSE)
+
+dsRE_Train_porcentajes <- dsRE_porcentajes[trainIndex,]
+dsRE_Test_porcentajes <- dsRE_porcentajes[-trainIndex,]
+
+dsRE_Train_absolutos <-dsRE_absolutos[trainIndex,]
+dsRE_Test_absolutos <- dsRE_absolutos[-trainIndex,]
+
+minmax_Train <- minmax[trainIndex,]
+minmax_Test <- minmax[-trainIndex,]
+
+final_Train <- final[trainIndex,]
+final_Test <- final[-trainIndex,]
+
+# Separación entre Atracción y Generación
+Acolumns = c(1:9)
+Gcolumns = c(1:8,10)
+
+dsRE_A_Train_porcentajes <- dsRE_Train_porcentajes[Acolumns]
+dsRE_G_Train_porcentajes <- dsRE_Train_porcentajes[Gcolumns]
+
+dsRE_A_Test_porcentajes <- dsRE_Test_porcentajes[Acolumns]
+dsRE_G_Test_porcentajes <- dsRE_Test_porcentajes[Gcolumns]
+
+dsRE_A_Train_absolutos <- dsRE_Train_absolutos[Acolumns]
+dsRE_G_Train_absolutos <- dsRE_Train_absolutos[Gcolumns]
+
+dsRE_A_Test_absolutos <- dsRE_Test_absolutos[Acolumns]
+dsRE_G_Test_absolutos <- dsRE_Test_absolutos[Gcolumns]
+
+minmax_Train_A <- minmax_Train[Acolumns]
+minmax_Train_G <- minmax_Train[Gcolumns]
+
+minmax_Test_A <- minmax_Test[Acolumns]
+minmax_Test_G <- minmax_Test[Gcolumns]
+
+final_Train_A <- final_Train[Acolumns]
+final_Train_G <- final_Train[Gcolumns]
+
+final_Test_A <- final_Test[Acolumns]
+final_Test_G <- final_Test[Gcolumns]
+# Escritura ficheros - NO EJECUTAR
+# write.table(dsRE_A_Train_porcentajes, "dsRE_A_Train_porcentajes.txt", sep = "\t", row.names = FALSE)
+# write.table(dsRE_G_Train_porcentajes, "dsRE_G_Train_porcentajes.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(dsRE_A_Test_porcentajes, "dsRE_A_Test_porcentajes.txt", sep = "\t", row.names = FALSE)
+# write.table(dsRE_G_Test_porcentajes, "dsRE_G_Test_porcentajes.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(dsRE_A_Train_absolutos, "dsRE_A_Train_absolutos.txt", sep = "\t", row.names = FALSE)
+# write.table(dsRE_G_Train_absolutos, "dsRE_G_Train_absolutos.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(dsRE_A_Test_absolutos, "dsRE_A_Test_absolutos.txt", sep = "\t", row.names = FALSE)
+# write.table(dsRE_G_Test_absolutos, "dsRE_G_Test_absolutos.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(minmax_Train_A, "minmax_Train_A.txt", sep = "\t", row.names = FALSE)
+# write.table(minmax_Test_A, "minmax_Test_A.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(minmax_Train_G, "minmax_Train_G.txt", sep = "\t", row.names = FALSE)
+# write.table(minmax_Test_G, "minmax_Test_G.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(final_Train_A, "final_Train_A.txt", sep = "\t", row.names = FALSE)
+# write.table(final_Test_A, "final_Test_A.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(final_Train_G, "final_Train_G.txt", sep = "\t", row.names = FALSE)
+# write.table(final_Test_G, "final_Test_G.txt", sep = "\t", row.names = FALSE)
+```
+
+
+3 ANÁLISIS BIVARIANTE
+```{r}
+rm(list=ls())
+# Load necessary libraries
+library(ggplot2)
+library(GGally)
+library(corrplot)
+
+# Load your dataset
+data <- read.table('dataset_absolutos_F2.txt', header = TRUE)
+data2 <- read.table('dataset_porcentajes_F2.txt', header = TRUE)
+
+# Scatterplots with regression line between atraccion and all other variables
+variables <- names(data)[-which(names(data) %in% c("id", "atraccion"))]
+
+for (var in variables) {
+  p <- ggplot(data, aes_string(x = var, y = "atraccion")) +
+    geom_point() +
+    geom_smooth(method = "lm", col = "blue") +
+    labs(title = paste("Scatterplot of atraccion vs", var),
+         x = var, y = "atraccion")
+  print(p)
+}
+
+# Scatterplots with regression line between generacion and all other variables
+for (var in variables) {
+  q <- ggplot(data, aes_string(x = var, y = "generacion")) +
+    geom_point() +
+    geom_smooth(method = "lm", col = "blue") +
+    labs(title = paste("Scatterplot of generacion vs", var),
+         x = var, y = "generacion")
+  print(q)
+}
+
+# Scatterplots with regression line between pob and all other variables
+for (var in setdiff(variables, "Pob")) {
+  r <- ggplot(data, aes_string(x = var, y = "pob")) +
+    geom_point() +
+    geom_smooth(method = "lm", col = "blue") +
+    labs(title = paste("Scatterplot of pob vs", var),
+         x = var, y = "pob")
+  print(r)
+}
+
+# Scatterplots with regression line between sup_tot and all other variables
+for (var in setdiff(variables, "sup_tot")) {
+  s <- ggplot(data, aes_string(x = var, y = "sup_tot")) +
+    geom_point() +
+    geom_smooth(method = "lm", col = "blue") +
+    labs(title = paste("Scatterplot of sup_tot vs", var),
+         x = var, y = "sup_tot")
+  print(s)
+}
+
+# Heatmap percentajes with Pearson Correlation between all variables
+cor_matrix <- cor(data2[,-which(names(data2) == "id")], use = "complete.obs")
+pdf("correlation_heatmap_percentajes.pdf", height = 22.5, width = 22.5)
+corrplot(cor_matrix, method = "color", tl.col = "black", tl.cex = 1.2, number.cex = 1.2)
+dev.off()
+
+# Heatmap absolutos with Pearson Correlation between all variables
+cor_matrix <- cor(data[,-which(names(data) == "id")], use = "complete.obs")
+pdf("correlation_heatmap_absolutos.pdf", height = 22.5, width = 22.5)
+corrplot(cor_matrix, method = "color", tl.col = "black", tl.cex = 1.2, number.cex = 1.2)
+dev.off()
+
+# Scatterplots with regression lines between all variables in a book format
+
+# Create a PDF to store the scatterplots
+pdf("scatterplot_matrix_book.pdf", height = 12, width = 12)
+
+# Loop through each pair of variables to create scatterplots
+variables <- names(data)[-which(names(data) == "id")]
+for (i in 1:length(variables)) {
+  for (j in i:length(variables)) {
+    if (i != j) {
+      p <- ggplot(data, aes_string(x = variables[i], y = variables[j])) +
+        geom_point() +
+        geom_smooth(method = "lm", col = "blue") +
+        labs(title = paste("Scatterplot of", variables[i], "vs", variables[j]),
+             x = variables[i], y = variables[j])
+      print(p)
+    }
+  }
+}
+
+# Close the PDF device
+dev.off()
+```
+
+
+```
+
+PCA - SE NECESITA REHACER CON LAS CORRECIONES DE LIDIA DEL DOCUMENTO DE NOTAS
+
+Para hacer la pca vamos a hacer varias consideraciones:
+- Quitaremos la columna de "id".
+- Quitaremos una variable de cada uno de los grupos de porcentajes para evitar el sobreajustes, redundancias y multicolinealidades.
+0. LIMPIAR RSTUDIO
+```{r}
+# Clean plots
+if(!is.null(dev.list())) dev.off()
+# Clean data
+rm(list=ls())
+```
+
+PCA Y CLUSTERIZACIÓN
+```{r}
+# Cargar las bibliotecas necesarias
+library(FactoMineR)
+library(factoextra)
+library(dbscan)
+library(cluster)
+library(dplyr)
+library(ggplot2)
+library(ggrepel)
+
+# Cargar los datos
+ds_absolutos <- read.table("dataset_absolutos_F2.txt", header = TRUE)
+columnas <- c('pob', 'r_alta', 'r_media','r_baja', 'pob_25', 'pob_2565', 'pob_65','sup_tot', 'c_sup','sr_sup', 'i_sup', 'atraccion', 'generacion')
+ds_absolutos <- ds_absolutos[columnas]
+
+# Realizar PCA
+pca_results <- PCA(ds_absolutos, quanti.sup = c('atraccion', 'generacion'), ncp = 6, axes = 1:2, graph = TRUE)
+pca_results_34 <- PCA(ds_absolutos, quanti.sup = c('atraccion', 'generacion'), ncp = 6, axes = 3:4, graph = TRUE)
+
+# Resumen de los resultados del PCA
+summary(pca_results)
+# Scree plot para visualizar la varianza explicada
+fviz_screeplot(pca_results, addlabels = TRUE, ylim=c(0,80))
+
+# Calcular la matriz de distancias usando las coordenadas de los individuos
+dd <- dist(pca_results$ind$coord)
+
+# Función para escalar entre 0 y 1
+range01 <- function(x) { (x - min(x)) / (max(x) - min(x)) }
+
+# Escalar los datos
+ds_absolutos_scaled <- ds_absolutos %>% mutate(across(all_of(columnas), range01))
+
+# Almaceno datos PCA
+pc1 <- pca_results$ind$coord[,1]
+pc2 <- pca_results$ind$coord[,2]
+pcdata <- data.frame(pc1,pc2)
+
+# Determinar el número óptimo de clusters usando el método de la silueta
+fviz_nbclust(pca_results$ind$coord, kmeans, method = "silhouette")
+
+# Realizar HCPC para la clusterización jerárquica
+res.hcpc <- HCPC(pca_results, nb.clust = 3, graph = TRUE)
+fviz_cluster(res.hcpc, data = pcdata, geom = "point")
+
+
+# Realizar DBSCAN sobre los datos escalados
+dbscan_result <- dbscan(ds_absolutos_scaled, eps = 0.55, minPts = 5)
+sil_dbscan <- silhouette(dbscan_result$cluster, dist(ds_absolutos_scaled))
+fviz_silhouette(sil_dbscan)
+print(dbscan_result)
+
+# Visualizar los resultados de DBSCAN si hay clústeres encontrados
+if (max(dbscan_result$cluster) > 0) {
+  fviz_cluster(dbscan_result, data = pcdata, geom = "point")
+} else {
+  print("No se encontraron clústeres con DBSCAN.")
+}
+
+# Añadir número de cluster
+col <- print(res.hcpc$data.clust$clust)
+col <- as.numeric(col)
+ds_new <- data.frame(ds_absolutos,col)
+plot(y=ds_new$col,x=ds_new$pob)
+
+# Definir 3 columnas separadas
+cluster_values <- c(1, 2, 3)
+
+# Create new columns indicating presence or absence in each cluster
+for (value in cluster_values) {
+  ds_new[paste0("cluster_", value)] <- ifelse(ds_new$col == value, 1, -1)
+}
+
+ds_cluster <- ds_new[, !names(ds_new) %in% c("col","cluster_3")]
+
+#Función para escalar entre -1 y 1
+range11 <- function(x) {
+  min_x <- min(x, na.rm = TRUE)
+  max_x <- max(x, na.rm = TRUE)
+  scaled_x <- 2 * (x - min_x) / (max_x - min_x) - 1
+  return(scaled_x)
+}
+
+columns3 = c(1:15)
+
+ds_RE_cluster_range01 <- ds_cluster %>%
+  mutate(across(all_of(columns3), range01))
+ds_RE_cluster_range11 <- ds_cluster %>%
+  mutate(across(all_of(columns3), range11))
+
+# Separación entre train y test
+set.seed(123)  # Para reproducibilidad
+trainIndex <- createDataPartition(ds_cluster$pob, p = 0.78125, list = FALSE)
+
+ds_RE_cluster_Train_range01 <- ds_RE_cluster_range01[trainIndex,]
+ds_RE_cluster_Test_range01 <- ds_RE_cluster_range01[-trainIndex,]
+
+ds_RE_cluster_Train_range11 <- ds_RE_cluster_range11[trainIndex,]
+ds_RE_cluster_Test_range11 <- ds_RE_cluster_range11[-trainIndex,]
+
+# Separo atracción y generación
+
+columnsAtr <-  c('pob', 'r_alta', 'r_media', 'pob_25', 'pob_2565', 'sup_tot','sr_sup', 'i_sup', 'atraccion','cluster_1','cluster_2')
+columnsGen <- c('pob', 'r_alta', 'r_media', 'pob_25', 'pob_2565', 'sup_tot','sr_sup', 'i_sup', 'generacion','cluster_1','cluster_2')
+
+ds_RE_cluster_Train_A_range01 <- ds_RE_cluster_Train_range01[columnsAtr]
+ds_RE_cluster_Train_G_range01 <- ds_RE_cluster_Train_range01[columnsGen]
+
+ds_RE_cluster_Test_A_range01 <- ds_RE_cluster_Test_range01[columnsAtr]
+ds_RE_cluster_Test_G_range01 <- ds_RE_cluster_Test_range01[columnsGen]
+
+ds_RE_cluster_Train_A_range11 <- ds_RE_cluster_Train_range11[columnsAtr]
+ds_RE_cluster_Train_G_range11 <- ds_RE_cluster_Train_range11[columnsGen]
+
+ds_RE_cluster_Test_A_range11 <- ds_RE_cluster_Test_range11[columnsAtr]
+ds_RE_cluster_Test_G_range11 <- ds_RE_cluster_Test_range11[columnsGen]
+
+# Escritura archivos - NO EJECUTAR
+# write.table(ds_RE_cluster_Train_A_range01, "dsRE_cluster_Train_A_Abs_range01.txt", sep = "\t", row.names = FALSE)
+# write.table(ds_RE_cluster_Train_G_range01, "dsRE_cluster_Train_G_Abs_range01.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(ds_RE_cluster_Test_A_range01, "dsRE_cluster_Test_A_Abs_range01.txt", sep = "\t", row.names = FALSE)
+# write.table(ds_RE_cluster_Test_G_range01, "dsRE_cluster_Test_G_Abs_range01.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(ds_RE_cluster_Train_A_range11, "dsRE_cluster_Train_A_Abs_range11.txt", sep = "\t", row.names = FALSE)
+# write.table(ds_RE_cluster_Train_G_range11, "dsRE_cluster_Train_G_Abs_range11.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(ds_RE_cluster_Test_A_range11, "dsRE_cluster_Test_A_Abs_range11.txt", sep = "\t", row.names = FALSE)
+# write.table(ds_RE_cluster_Test_G_range11, "dsRE_cluster_Test_G_Abs_range11.txt", sep = "\t", row.names = FALSE)
+
+# PREPARACIÓN DATOS EN FRACCIONES
+ds_porcentajes <- read.table("dataset_porcentajes_F2.txt", header = TRUE)
+columnas4 <- c('pob', 'r_alta', 'r_media','pob_25', 'pob_2565', 'sup_tot', 'sr_sup', 'i_sup', 'atraccion', 'generacion')
+ds_porcentajes <- ds_porcentajes[columnas4]
+
+# Resumen de los clústeres
+ds_new2 <- data.frame(ds_porcentajes,col)
+table(ds_absolutos$cluster)
+
+dsRECluster_Por_range01 <- ds_porcentajes %>%
+  mutate(across(all_of(c('pob','sup_tot','atraccion','generacion')), range01))
+
+dsRECluster_Por_Train_range01 <- ds_RE_cluster_range01[trainIndex,]
+dsRECluster_Por_Test_range01 <- ds_RE_cluster_range01[-trainIndex,]
+
+dsRECluster_Por_Train_A_range01 <- dsRECluster_Por_Train_range01[columnsAtr]
+dsRECluster_Por_Train_G_range01 <- dsRECluster_Por_Train_range01[columnsGen]
+
+dsRECluster_Por_Test_A_range01 <- dsRECluster_Por_Test_range01[columnsAtr]
+dsRECluster_Por_Test_G_range01 <- dsRECluster_Por_Test_range01[columnsGen]
+
+
+# ESCRITURA DE ARCHIVOS - NO EJECUTAR
+# write.table(dsRECluster_Por_Train_A_range01, "dsRECluster_Por_Train_A_range01.txt", sep = "\t", row.names = FALSE)
+# write.table(dsRECluster_Por_Train_G_range01, "dsRECluster_Por_Train_G_range01.txt", sep = "\t", row.names = FALSE)
+# 
+# write.table(dsRECluster_Por_Test_A_range01, "dsRECluster_Por_Test_A_range01.txt", sep = "\t", row.names = FALSE)
+# write.table(dsRECluster_Por_Test_G_range01, "dsRECluster_Por_Test_G_range01.txt", sep = "\t", row.names = FALSE)
+
+```
+
+0. LIMPIAR RSTUDIO
+```{r}
+# Clean plots
+if(!is.null(dev.list())) dev.off()
+# Clean data
+rm(list=ls())
+```
+
+EVALUACIÓN TRANSOFRMACIONES
+```{r}
+# Instalar las librerías necesarias si no están instaladas
+if (!require(ggplot2)) {
+  install.packages("ggplot2")
+}
+if (!require(gridExtra)) {
+  install.packages("gridExtra")
+}
+
+# Cargar las librerías necesarias
+library(tidyverse)
+library(ggplot2)
+library(gridExtra)
+
+# Leer el archivo CSV 'train_selected.csv'
+train <- read.table("dataset_absolutos_F2.txt", header = TRUE)
+
+# Mostrar la estructura del dataframe y tipos de datos
+str(train)
+print(sapply(train, class))
+
+# Convertir las variables a numéricas explícitamente
+train <- train %>%
+  mutate(across(c("pob", "sup_tot", "generacion", "atraccion"), as.numeric))
+
+# Confirmar la conversión mostrando los tipos de datos nuevamente
+print(sapply(train, class))
+
+# Visualizar la distribución original y transformada de cada variable
+variables <- c("pob", "sup_tot", "generacion", "atraccion")
+
+# Función para generar histogramas originales y transformados
+generate_histograms <- function(data, variable) {
+  if (!all(sapply(data[[variable]], is.numeric))) {
+    stop(paste("La variable", variable, "contiene valores no numéricos."))
+  }
+  
+  p1 <- ggplot(data, aes_string(x = variable)) +
+    geom_histogram(bins = 30, fill = "blue", color = "black") +
+    theme_minimal(base_size = 16) +  # Aumentar el tamaño del texto base
+    labs(title = paste("Distribución Original de", variable),
+         x = variable,
+         y = "Frecuencia")
+  
+  transformed_var <- log1p(data[[variable]])
+  
+  p2 <- ggplot(data.frame(transformed_var), aes(x = transformed_var)) +
+    geom_histogram(bins = 30, fill = "green", color = "black") +
+    theme_minimal(base_size = 16) +  # Aumentar el tamaño del texto base
+    labs(title = paste("Distribución Log Transformada de", variable),
+         x = paste("log(1 +", variable, ")"),
+         y = "Frecuencia")
+  
+  return(list(p1, p2))
+}
+
+# Generar los histogramas para cada variable
+plots <- lapply(variables, function(var) {
+  if (is.numeric(train[[var]])) {
+    generate_histograms(train, var)
+  } else {
+    warning(paste("La variable", var, "no es numérica y será omitida."))
+    return(NULL)
+  }
+})
+
+# Filtrar gráficos nulos
+plots <- Filter(Negate(is.null), plots)
+
+# Aplanar la lista de listas de gráficos
+plots <- do.call(c, plots)
+
+# Crear el layout para que los gráficos sean más altos que anchos
+layout_matrix <- matrix(seq(1, length(plots)), ncol = 2, byrow = TRUE)
+
+# Definir el tamaño del gráfico
+png("combined_histograms.png", width = 1500, height = 1500) # Definir tamaño en píxeles
+
+# Dibujar los gráficos en el dispositivo gráfico definido
+grid.arrange(grobs = plots, layout_matrix = layout_matrix)
+
+# Guardar el archivo
+dev.off()
+```
+0. LIMPIAR RSTUDIO
+```{r}
+# Clean plots
+if(!is.null(dev.list())) dev.off()
+# Clean data
+rm(list=ls())
+```
+
+FEATURES IMPORTANCE
+```{r}
+install.packages("randomForest")
+install.packages("dplyr")
+install.packages("caret")
+install.packages("ggplot2")
+library(randomForest)
+library(dplyr)
+library(caret)
+library(ggplot2)
+
+# Verificar si las variables objetivo existen en el dataset
+ds_absolutos <- read.table("dataset_absolutos_F2.txt", header = TRUE)
+columnas <- c('pob', 'r_alta', 'r_media','r_baja', 'pob_25', 'pob_2565', 'sup_tot', 'sr_sup', 'i_sup','c_sup', 'atraccion', 'generacion')
+ds_absolutos <- ds_absolutos[columnas]
+
+
+if (!("atraccion" %in% names(ds_absolutos)) | !("generacion" %in% names(ds_absolutos))) {
+  stop("Las variables objetivo 'atraccion' y/o 'generacion' no se encuentran en el dataset.")
+}
+
+# Crear datasets separados para cada target
+ds_atraccion <- ds_absolutos %>% select(-generacion)
+ds_generacion <- ds_absolutos %>% select(-atraccion)
+
+# Random Forest para atraccion
+modelo_rf_atraccion <- randomForest(atraccion ~ ., data = ds_atraccion, importance = TRUE)
+importancia_atraccion <- importance(modelo_rf_atraccion)
+importancia_atraccion <- as.data.frame(importancia_atraccion)
+importancia_atraccion$Variable <- rownames(importancia_atraccion)
+
+# Random Forest para generacion
+modelo_rf_generacion <- randomForest(generacion ~ ., data = ds_generacion, importance = TRUE)
+importancia_generacion <- importance(modelo_rf_generacion)
+importancia_generacion <- as.data.frame(importancia_generacion)
+importancia_generacion$Variable <- rownames(importancia_generacion)
+
+# Crear tablas de importancia utilizando IncNodePurity
+tabla_atraccion <- importancia_atraccion %>%
+  arrange(desc(IncNodePurity)) %>%
+  select(Variable, IncNodePurity) %>%
+  rename(Importancia_Atraccion = IncNodePurity)
+
+tabla_generacion <- importancia_generacion %>%
+  arrange(desc(IncNodePurity)) %>%
+  select(Variable, IncNodePurity) %>%
+  rename(Importancia_Generacion = IncNodePurity)
+
+# Gráfico de barras para atraccion
+grafico_atraccion <- ggplot(tabla_atraccion, aes(x = reorder(Variable, Importancia_Atraccion), y = Importancia_Atraccion)) +
+  geom_bar(stat = "identity", fill = "steelblue") +
+  coord_flip() +
+  labs(title = "Importancia de las características en Atracción", x = "Características", y = "Importancia (IncNodePurity)")
+
+# Gráfico de barras para generacion
+grafico_generacion <- ggplot(tabla_generacion, aes(x = reorder(Variable, Importancia_Generacion), y = Importancia_Generacion)) +
+  geom_bar(stat = "identity", fill = "darkorange") +
+  coord_flip() +
+  labs(title = "Importancia de las características en Generacion", x = "Características", y = "Importancia (IncNodePurity)")
+
+# Mostrar los gráficos
+print(grafico_atraccion)
+print(grafico_generacion)
+```
+UNIR DATOS FINALES
+```{r}
+library(dplyr)
+library(readr)
+
+# Cargar el dataset desde el archivo CSV
+metrics_path_svr <- 'output_svr/Metrics_SVR.csv'
+Metrics_SVR <- read_csv(metrics_path_svr)
+metrics_path_nn <- 'output_nn/Metrics_NN.csv'
+Metrics_NN <- read_csv(metrics_path_nn)
+
+# Combinar los dataframes
+combined_metrics <- bind_rows(Metrics_SVR, Metrics_NN)
+
+# Ordenar el dataframe combinado de menor a mayor según la columna RMSLE
+sorted_metrics <- combined_metrics %>% arrange(RMSLE)
+
+# Mostrar el dataframe ordenado
+print(sorted_metrics)
+```
+

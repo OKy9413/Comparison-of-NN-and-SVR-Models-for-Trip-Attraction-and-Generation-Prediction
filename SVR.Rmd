@@ -1,0 +1,185 @@
+
+
+```{r}
+rm(list = ls())
+graphics.off()
+cat("\014")
+```
+
+SVR FUNCTION CODE 
+```{r}
+svr_model <- function(train, test, target, Nombre, Escala, Tipo){
+  # Comprobar si las librerías necesarias están instaladas; si no, instalarlas
+  if (!require(caret)) {
+    install.packages("caret")
+  }
+  if (!require(e1071)) {
+    install.packages("e1071")
+  }
+  if (!require(ggplot2)) {
+    install.packages("ggplot2")
+  }
+  if (!require(Metrics)) {
+    install.packages("Metrics")
+  }
+  library(caret)
+  library(e1071)
+  library(ggplot2)
+  library(Metrics)
+  
+  # Cargar los datos de entrenamiento
+  if (grepl("\\.txt$", train)) {
+    df_train <- read.table(train, header=TRUE)
+  } else if (grepl("\\.csv$", train)) {
+    df_train <- read.csv(train, header=TRUE)
+  } else {
+    stop("El archivo de entrenamiento no es ni .txt ni .csv.")
+  }
+  
+  # Cargar los datos de prueba
+  if (grepl("\\.txt$", test)) {
+    df_test <- read.table(test, header=TRUE)
+  } else if (grepl("\\.csv$", test)) {
+    df_test <- read.csv(test, header=TRUE)
+  } else {
+    stop("El archivo de prueba no es ni .txt ni .csv.")
+  }
+  
+  # Definir la función para calcular RMSE
+  rmse <- function(actual, predicted) {
+    sqrt(mean((actual - predicted)^2))
+  }
+
+  # Definir el grid de hiperparámetros incluyendo cost y epsilon
+  tuneGrid <- expand.grid(
+    nu = c(0.05, 0.1, 0.15, 0.2),
+    gamma = c(0.5, 1, 1.5, 2),
+    cost = c(1, 10, 100),
+    epsilon = c(0.1, 0.01)
+  )
+
+  # Inicializar variables para guardar el mejor modelo y el mejor rendimiento
+  best_model <- NULL
+  best_performance <- Inf
+  best_hyperparameters <- list()
+
+  # Realizar la búsqueda manual de los mejores hiperparámetros usando RMSE
+  for (i in 1:nrow(tuneGrid)) {
+    set.seed(123)  # Para reproducibilidad
+    model <- svm(
+      as.formula(paste(target, "~ .")), 
+      data = df_train, 
+      type = "nu-regression", 
+      kernel = "radial", 
+      gamma = tuneGrid$gamma[i], 
+      nu = tuneGrid$nu[i], 
+      cost = tuneGrid$cost[i],
+      epsilon = tuneGrid$epsilon[i],
+      tolerance = 0.001, 
+      shrinking = TRUE, 
+      cross = 3
+    )
+    
+    # Obtener las predicciones para los datos de entrenamiento utilizando cross-validation
+    preds <- predict(model, df_train)
+    
+    # Calcular el RMSE
+    performance <- rmse(df_train[[target]], preds)
+    
+    # Imprimir los hiperparámetros y el rendimiento del modelo actual
+    cat("Gamma:", tuneGrid$gamma[i], 
+        "Nu:", tuneGrid$nu[i], 
+        "Cost:", tuneGrid$cost[i], 
+        "Epsilon:", tuneGrid$epsilon[i], 
+        "Performance (RMSE):", performance, "\n")
+    
+    # Si el rendimiento del modelo actual es mejor que el mejor rendimiento, actualizar el mejor modelo
+    if (performance < best_performance) {
+      best_performance <- performance
+      best_model <- model
+      best_hyperparameters <- list(nu = tuneGrid$nu[i], gamma = tuneGrid$gamma[i], cost = tuneGrid$cost[i], epsilon = tuneGrid$epsilon[i])
+    }
+  }
+
+  # Hacer predicciones con el mejor modelo SVM entrenado
+  predictions <- predict(best_model, df_test)
+
+  # Llamar a función de Evaluación de resultados
+  source("EvaluacionResultados_svr.R")
+
+  EvaluacionResultados(df_test[[target]],
+                       predictions,
+                       Nombre,
+                       Escala,
+                       Tipo,
+                       best_hyperparameters,
+                       "output_svr")
+}
+```
+
+DESCRIPCION EN LISTAS DE LAS CARACTERÍSTICAS DE LOS ARCHIVOS
+```{r}
+train_df <- c('dsRE_A_Train_absolutos.txt', 'dsRE_G_Train_absolutos.txt', 'minmax_Train_A.txt', 'minmax_Train_G.txt', 'dsRE_cluster_Train_A_Abs_range01.txt', 'dsRE_cluster_Train_G_Abs_range01.txt', 'dsRE_A_Train_porcentajes.txt', 'dsRE_G_Train_porcentajes.txt', 'dsRECluster_Por_Train_A_range01.txt', 'dsRECluster_Por_Train_G_range01.txt')
+test_df <- c('dsRE_A_Test_absolutos.txt', 'dsRE_G_Test_absolutos.txt', 'minmax_Test_A.txt', 'minmax_Test_G.txt', 'dsRE_cluster_Test_A_Abs_range01.txt', 'dsRE_cluster_Test_G_Abs_range01.txt', 'dsRE_A_Test_porcentajes.txt', 'dsRE_G_Test_porcentajes.txt', 'dsRECluster_Por_Test_A_range01.txt', 'dsRECluster_Por_Test_G_range01.txt')
+target_list <- c('atraccion', 'generacion', 'atraccion', 'generacion', 'atraccion', 'generacion', 'atraccion', 'generacion', 'atraccion', 'generacion')
+Nombre <- c('SVR_Abs_A_cr', 'SVR_Abs_G_cr', 'SVR_Abs_A_range01', 'SVR_Abs_G_range01', 'SVRClust_Abs_A_range01', 'SVRClust_Abs_G_range01', 'SVR_Por_A_range01', 'SVR_Por_G_range01', 'SVRClust_Por_A_range01', 'SVRClust_Por_G_range01')
+Escala <- c('cr', 'cr', 'range01', 'range01', 'range01', 'range01', 'range01', 'range01', 'range01', 'range01')
+Tipo <- c('A', 'G', 'A', 'G', 'A', 'G', 'A', 'G', 'A', 'G')
+```
+
+EJECUCIÓN DE LA FUNCIÓN SVR_MODEL PARA TODOS LOS DATASETS
+```{r}
+n <- length(train_df)
+
+# Bucle para llamar a svr_model con los elementos correspondientes de las listas
+for (i in 1:n) {
+  svr_model(
+    train = train_df[i], 
+    test = test_df[i], 
+    target = target_list[i], 
+    Nombre = Nombre[i], 
+    Escala = Escala[i], 
+    Tipo = Tipo[i]
+  )
+}
+```
+COMPENDIO DE RESULTADOS EN UN MISMO DATASET
+```{r}
+# Cargar librerías necesarias
+if (!require(dplyr)) {
+  install.packages("dplyr")
+}
+if (!require(readr)) {
+  install.packages("readr")
+}
+
+library(dplyr)
+library(readr)
+
+# Lista de nombres de archivos basada en el prefijo 'Param_' y la lista Nombre
+Nombre <- c('SVR_Abs_A_cr', 'SVR_Abs_G_cr', 'SVR_Abs_A_range01', 'SVR_Abs_G_range01', 'SVRClust_Abs_A_range01', 'SVRClust_Abs_G_range01', 'SVR_Por_A_range01', 'SVR_Por_G_range01', 'SVRClust_Por_A_range01', 'SVRClust_Por_G_range01')
+file_paths <- paste0('output_svr/Param_', Nombre, '.csv')
+
+# Leer y unir todos los archivos CSV en un solo dataframe
+Metrics_SVR <- bind_rows(lapply(file_paths, read_csv))
+
+# Guardar el dataframe unido en un archivo CSV
+output_path <- 'output_svr/Metrics_SVR.csv'
+write_csv(Metrics_SVR, output_path)
+```
+
+VISUALIZACIÓN DE LAS MÉTRICAS
+```{r}
+library(dplyr)
+library(readr)
+
+# Cargar el dataset desde el archivo CSV
+metrics_path <- 'output_svr/Metrics_SVR.csv'
+Metrics_SVR <- read_csv(metrics_path)
+
+# Mostrar el DataFrame ordenado por la columna RMSLE de menor a mayor
+Metrics_SVR_sorted <- Metrics_SVR %>% arrange(RMSLE)
+print(Metrics_SVR_sorted)
+```
+
+
